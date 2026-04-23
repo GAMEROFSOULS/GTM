@@ -1,4 +1,3 @@
-import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
 interface TierBadgeProps {
@@ -8,23 +7,45 @@ interface TierBadgeProps {
 
 export function TierBadge({ tier, className }: TierBadgeProps) {
   const t = (tier || "").toUpperCase();
+
   if (t === "HOT") {
     return (
-      <Badge className={cn("bg-hot text-hot-foreground hover:bg-hot/90 border-0 font-semibold", className)}>
+      <span
+        className={cn(
+          "inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold",
+          "bg-red-600 text-white",
+          className
+        )}
+      >
         🔥 HOT
-      </Badge>
+      </span>
     );
   }
+
   if (t === "WARM") {
     return (
-      <Badge className={cn("bg-warm text-warm-foreground hover:bg-warm/90 border-0 font-semibold", className)}>
+      <span
+        className={cn(
+          "inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold",
+          "bg-amber-400 text-amber-900",
+          className
+        )}
+      >
         🟡 WARM
-      </Badge>
+      </span>
     );
   }
+
+  // COLD (default)
   return (
-    <Badge className={cn("bg-cold text-cold-foreground hover:bg-cold/90 border-0 font-semibold", className)}>
-      ❄️ {t || "COLD"}
-    </Badge>
+    <span
+      className={cn(
+        "inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold",
+        "bg-slate-600 text-white",
+        className
+      )}
+    >
+      ❄️ COLD
+    </span>
   );
 }
