@@ -9,59 +9,98 @@ const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string | und
 export const supabaseConfigured = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
 
 // ---------------------------------------------------------------------------
-// Column mapping — actual Supabase table schema:
-//   id, full_name, email, linkedin_url, headline, company,
-//   side, score, tier, reason, qualified_at
+// Defensive mapper — handles both possible column name variants so we never
+// crash if the schema uses 'name' instead of 'full_name', etc.
 // ---------------------------------------------------------------------------
+function str(row: Record<string, unknown>, ...keys: string[]): string {
+  for (const key of keys) {
+    if (row[key] != null && row[key] !== "") return String(row[key]);
+  }
+  return "";
+}
+
+function num(row: Record<string, unknown>, ...keys: string[]): number {
+  for (const key of keys) {
+    if (row[key] != null) {
+      const n = typeof row[key] === "number" ? row[key] as number : parseInt(String(row[key]), 10);
+      if (!isNaN(n)) return n;
+    }
+  }
+  return 0;
+}
+
 function rowToLead(row: Record<string, unknown>): Lead {
-  const qualifiedAt = (row.qualified_at as string) ?? "";
-  // Format timestamp as "YYYY-MM-DD HH:mm" if it looks like an ISO string
-  const formattedDate = qualifiedAt
-    ? qualifiedAt.slice(0, 16).replace("T", " ")
-    : "";
+  // name  ← tries 'name', 'full_name' in order
+  const name          = str(row, "name", "full_name");
+  // score ← tries 'score', 'ai_score'
+  const score         = num(row, "score", "ai_score");
+  // tier  ← tries 'tier', 'ai_tier'
+  const tier          = str(row, "tier", "ai_tier").toUpperCase() || "COLD";
+  // reason ← tries 'reason', 'ai_reason'
+  const reason        = str(row, "reason", "ai_reason");
+  // pitch ← tries 'reloadium_pitch', 'pitch'
+  const pitch         = str(row, "reloadium_pitch", "pitch");
+  // date  ← tries 'qualified_at', 'created_at'
+  const rawDate       = str(row, "qualified_at", "created_at");
+  const formattedDate = rawDate ? rawDate.slice(0, 16).replace("T", " ") : "";
 
   return {
-    id:            (row.id as string) ?? "",
-    name:          (row.full_name as string) ?? "",
-    email:         (row.email as string) ?? "",
-    linkedin:      (row.linkedin_url as string) ?? "",
-    company:       (row.company as string) ?? (row.headline as string) ?? "",
-    score:         typeof row.score === "number"
-                     ? row.score
-                     : parseInt(String(row.score ?? "0"), 10) || 0,
-    tier:          ((row.tier as string) ?? "COLD").toUpperCase(),
-    reason:        (row.reason as string) ?? "",
-    pitch:         "",      // not in this schema — kept for type compat
-    email_subject: "",      // not in this schema — kept for type compat
-    email_body:    "",      // not in this schema — kept for type compat
-    side:          (row.side as string) ?? "",
+    id:            str(row, "id"),
+    name,
+    email:         str(row, "email"),
+    linkedin:      str(row, "linkedin_url", "linkedin"),
+    company:       str(row, "company", "headline"),
+    score,
+    tier,
+    reason,
+    pitch,
+    email_subject: str(row, "email_subject"),
+    email_body:    str(row, "email_body"),
+    side:          str(row, "side"),
     qualified_at:  formattedDate,
-    status:        (row.status as string) ?? "",
+    status:        str(row, "status"),
   };
 }
 
 export async function fetchLeadsRaw(): Promise<Lead[]> {
   const { data, error } = await supabase
     .from("leads")
-    .select("id, full_name, email, linkedin_url, headline, company, side, score, tier, reason, qualified_at, status")
-    .order("qualified_at", { ascending: false })
+    .select("*")                                     // fetch all columns — no column name assumptions
+    .order("created_at", { ascending: false })
     .limit(500);
 
   if (error) {
-    throw new Error(`Supabase error: ${error.message}`);
+    // Try ordering by qualified_at if created_at doesn't exist
+    const fallback = await supabase
+      .from("leads")
+      .select("*")
+      .limit(500);
+
+    if (fallback.error) {
+      throw new Error(`Supabase error: ${fallback.error.message}`);
+    }
+
+    // Sort in JS if no ordering column found
+    const rows = (fallback.data ?? []) as Record<string, unknown>[];
+    rows.sort((a, b) => {
+      const aDate = str(a, "qualified_at", "created_at");
+      const bDate = str(b, "qualified_at", "created_at");
+      return bDate.localeCompare(aDate);
+    });
+    return rows.map(rowToLead);
   }
 
-  return (data ?? []).map(rowToLead);
+  return (data as Record<string, unknown>[]).map(rowToLead);
 }
 
 export function useLeads() {
   const launched = useAgentStore((s) => s.agentLaunched);
   return useQuery({
     queryKey: ["leads"],
-    queryFn: fetchLeadsRaw,
+    queryFn:  fetchLeadsRaw,
     refetchInterval: launched ? 30_000 : false,
-    enabled: supabaseConfigured,
-    retry: 1,
+    enabled:  supabaseConfigured,
+    retry:    1,
     staleTime: 0,
   });
 }
